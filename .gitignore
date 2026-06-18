@@ -1,0 +1,24 @@
+# Environment & secrets
+.env
+
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Test audio files
+*.wav
+*.mp3
+
+# ngrok config
+ngrok.yml
+
+# Static audio assets
+static_audio/
+
+# IDE
+.vscode/
+.idea/

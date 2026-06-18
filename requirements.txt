@@ -1,0 +1,7 @@
+livekit-agents==1.6.1
+livekit-plugins-google==1.6.1
+livekit-plugins-sarvam==1.6.1
+livekit-plugins-openai==1.6.1
+livekit-local-inference==0.2.5
+python-dotenv==1.2.2
+loguru==0.7.3
