@@ -22,3 +22,15 @@ static_audio/
 # IDE
 .vscode/
 .idea/
+
+# Logs
+agent_debug.log
+*.log
+
+# Recordings
+recordings/
+scratch/recordings/
+
+# Test/Tool artifacts
+.kiro/
+.hypothesis/

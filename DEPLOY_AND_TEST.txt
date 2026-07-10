@@ -1,0 +1,165 @@
+═══════════════════════════════════════════════════════════════════════════════
+  DEPLOY TO LIVEKIT CLOUD + TEST OUTBOUND CALLS
+═══════════════════════════════════════════════════════════════════════════════
+
+PREREQUISITE: Install LiveKit CLI
+  https://docs.livekit.io/deploy/cli/
+  
+  On Windows/PowerShell:
+    winget install livekit
+  Or download: https://github.com/livekit/livekit-cli/releases
+
+STEP 1: Create LiveKit Cloud Project & Get Credentials
+  1. Go to https://cloud.livekit.io/
+  2. Create a new project (or use existing)
+  3. Copy your LIVEKIT_URL and create an API key/secret
+  4. Save these locally (don't commit to git)
+
+STEP 2: Authenticate the CLI
+  lk project use
+
+  (Paste your project URL when prompted)
+  It saves credentials to ~/.livekit/config.yaml
+
+STEP 3: Set Environment Variables in LiveKit Cloud Dashboard
+
+  Before deploying, go to cloud.livekit.io → Your Project → Agents → Environment
+  Add these secrets:
+  
+  DEEPGRAM_API_KEY=<your-deepgram-key>
+  GEMINI_API_KEY=<your-gemini-key>
+  SMALLEST_API_KEY=<your-smallest-ai-key>
+  SUPABASE_REST_URL=<your-supabase-url>
+  SUPABASE_API_KEY=<your-supabase-key>
+  VOBIZ_SIP_TRUNK_ID=<your-vobiz-trunk>
+  VOBIZ_SIP_DOMAIN=<your-vobiz-domain>
+  N8N_WEBHOOK_URL=http://127.0.0.1:5678/webhook/agent  (or your n8n URL)
+
+STEP 4: Deploy the Agent
+  cd ~/real-estate-agent
+  
+  lk agent create real-estate-agent
+  
+  OR if already exists:
+  
+  lk agent deploy
+  
+  This will:
+  1. Build a Docker image from your Dockerfile
+  2. Upload to LiveKit Cloud
+  3. Start running your agent
+  
+  Watch the build logs. If successful, you'll see:
+    ✓ Agent deployed
+    ✓ Agent running: real-estate-agent
+
+STEP 5: Verify Deployment
+  lk agent list
+  
+  Should show: real-estate-agent ... RUNNING ... 0 active sessions
+
+═══════════════════════════════════════════════════════════════════════════════
+  TESTING OUTBOUND CALLS AFTER DEPLOYMENT
+═══════════════════════════════════════════════════════════════════════════════
+
+OUTBOUND CALLS ARE TRIGGERED VIA n8n WEBHOOK.
+
+Setup:
+1. Ensure n8n is running locally:
+   npm run start
+   (or however you start n8n)
+
+2. Create an n8n workflow with a "Webhook" trigger on /webhook/ad-click
+   → That workflow calls LiveKit's CreateSipParticipant API
+   → Which routes to your newly deployed agent
+
+3. Test by calling your n8n webhook:
+
+   Method 1: Via Python script (already in scratch/)
+   ────────────────────────────────────────────────
+   python scratch/trigger_n8n_outbound.py +919876543210 "Test Customer"
+   
+   This sends a webhook payload to n8n, which triggers the outbound call.
+   
+   Method 2: Via curl
+   ──────────────────
+   curl -X POST http://localhost:5678/webhook/ad-click \
+     -H "Content-Type: application/json" \
+     -d '{
+       "customer_phone": "+919876543210",
+       "customer_name": "Test Customer",
+       "property_id": "d1111111-1111-1111-1111-111111111111",
+       "agent_id": "c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3",
+       "ad_source": "facebook",
+       "ad_id": "fb_ad_12345",
+       "campaign_name": "Test Campaign"
+     }'
+
+   Method 3: Via LiveKit CLI (direct SIP call)
+   ────────────────────────────────────────────
+   lk sip dial <your-trunk-id> "+919876543210" "test-room" "test-participant"
+   
+   (Only if you have CLI access to SIP; check with `lk sip --help`)
+
+WHAT HAPPENS:
+  1. n8n webhook receives payload
+  2. n8n calls LiveKit CreateSipParticipant API
+  3. LiveKit routes SIP call to your deployed agent
+  4. Agent answers, plays greeting, converses
+  5. Call ends, post-call data sent to n8n
+  6. n8n stores call transcript/metadata
+
+INBOUND CALLS (already working):
+  Vobiz → LiveKit SIP trunk → Your deployed agent
+  No manual trigger needed; happens automatically when someone calls your number.
+
+MONITORING:
+  Check agent activity:
+    lk agent logs real-estate-agent --follow
+  
+  Check LiveKit Cloud dashboard → Sessions to see live calls.
+
+═══════════════════════════════════════════════════════════════════════════════
+  TROUBLESHOOTING DEPLOYMENT
+═══════════════════════════════════════════════════════════════════════════════
+
+"Agent failed to build"
+  → Check Dockerfile syntax and imports
+  → Verify requirements.txt has all dependencies
+  → View build logs: lk agent logs
+
+"Agent running but no calls coming through"
+  → Verify environment variables are set in dashboard
+  → Check n8n webhook URL is correct
+  → Verify Vobiz trunk is configured in LiveKit
+
+"Outbound call fails / n8n webhook not received"
+  → Ensure n8n is running: npm run start
+  → Check n8n webhook is active: http://localhost:5678/webhook/ad-click
+  → Test locally first: python scratch/trigger_n8n_outbound.py
+
+"Memory/timeout errors"
+  → Free tier has limits. Check livekit.toml runtime.memory_limit_mb
+  → May need to upgrade to Ship tier if calls are crashing
+
+═══════════════════════════════════════════════════════════════════════════════
+  NEXT STEPS AFTER SUCCESSFUL DEPLOY
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Test inbound call:
+   Call your Vobiz number (if you have it set up)
+   Agent should answer and converse
+
+2. Test outbound call:
+   python scratch/trigger_n8n_outbound.py +919876543210 "Customer Name"
+   Agent should call the number and converse
+
+3. Monitor call quality:
+   Check LiveKit dashboard for latency, session duration, errors
+
+4. Review transcripts:
+   Check n8n execution history to see call transcripts and metadata
+
+5. If all works → You're ready for live clients!
+
+═══════════════════════════════════════════════════════════════════════════════

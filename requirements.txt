@@ -1,7 +1,16 @@
 livekit-agents==1.6.1
+livekit-plugins-deepgram==1.6.1
 livekit-plugins-google==1.6.1
+livekit-plugins-gnani==1.6.1
 livekit-plugins-sarvam==1.6.1
-livekit-plugins-openai==1.6.1
+livekit-plugins-smallestai==1.6.1
 livekit-local-inference==0.2.5
 python-dotenv==1.2.2
 loguru==0.7.3
+httpx==0.28.1
+numpy>=1.21.0
+scipy>=1.7.0
+livekit-plugins-noise-cancellation==0.2.6
+livekit-plugins-dtln==0.1.5
+onnxruntime>=1.18.0
+huggingface-hub>=0.19.0

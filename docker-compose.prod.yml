@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database (replaces Supabase)
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent_postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-agent_db}
+      POSTGRES_USER: ${DB_USER:-agent_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/002_postgres_production_schema.sql:/docker-entrypoint-initdb.d/02_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-agent_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agent_network
+    restart: unless-stopped
+
+  # Agent service (LiveKit Agents)
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_livekit
+    environment:
+      # LiveKit
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      
+      # Database (local Postgres instead of Supabase)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-agent_db}
+      DB_USER: ${DB_USER:-agent_user}
+      DB_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+      DATABASE_URL: postgresql://${DB_USER:-agent_user}:${DB_PASSWORD:-change_me_in_production}@postgres:5432/${DB_NAME:-agent_db}
+      
+      # Providers
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      SMALLEST_API_KEY: ${SMALLEST_API_KEY}
+      GNANI_API_KEY: ${GNANI_API_KEY}
+      
+      # n8n webhook
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/agent}
+      
+      # SIP
+      VOBIZ_SIP_TRUNK_ID: ${VOBIZ_SIP_TRUNK_ID}
+      VOBIZ_SIP_DOMAIN: ${VOBIZ_SIP_DOMAIN}
+      SARVAM_API_KEY: ${SARVAM_API_KEY}
+      
+      # Logging
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - agent_network
+    restart: unless-stopped
+    # Uncomment for systemd auto-restart in production
+    # deploy:
+    #   restart_policy:
+    #     condition: on-failure
+    #     delay: 10s
+    #     max_attempts: 5
+
+  # n8n workflow automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: agent_n8n
+    environment:
+      DB_TYPE: postgresql
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n}
+      DB_POSTGRESDB_USER: ${DB_USER:-agent_user}
+      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_TUNNEL_URL: ${WEBHOOK_TUNNEL_URL:-http://localhost/}
+      GENERIC_TIMEZONE: Asia/Kolkata
+    ports:
+      - "5678:5678"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - agent_network
+    restart: unless-stopped
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: agent_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - agent
+      - n8n
+    networks:
+      - agent_network
+    restart: unless-stopped
+    # Uncomment after SSL setup
+    # environment:
+    #   - SSL_CERT_PATH=/etc/nginx/ssl/cert.pem
+    #   - SSL_KEY_PATH=/etc/nginx/ssl/key.pem
+
+volumes:
+  postgres_data:
+    driver: local
+  n8n_data:
+    driver: local
+
+networks:
+  agent_network:
+    driver: bridge
+
+# Usage:
+#   docker-compose -f docker-compose.prod.yml up -d
+#   docker-compose -f docker-compose.prod.yml logs -f agent
+#   docker-compose -f docker-compose.prod.yml down

@@ -1,0 +1,22 @@
+[project]
+subdomain = "real-estate-agent-dadarhp7"
+
+[agent]
+id = "CA_Bpu8nDxcvECJ"
+
+entry_point = "src/agent.py"
+
+# Python version
+[dependencies]
+python_version = "3.12"
+
+# Build configuration
+[build]
+dockerfile = "Dockerfile"
+context = "."
+
+# Runtime configuration
+[runtime]
+timeout = 300  # 5 minutes max call duration
+workers = 1    # Number of concurrent agent workers (free tier: 1)
+memory_limit_mb = 1024  # Memory per agent instance

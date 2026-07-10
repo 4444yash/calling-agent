@@ -1,0 +1,195 @@
+================================================================================
+  CALL RECORDING TOOLS FOR LIVEKIT - START HERE
+================================================================================
+
+🎯 WHAT IS THIS?
+
+A complete toolkit to download, analyze, and debug your calling agent using
+actual call recordings from LiveKit Cloud.
+
+================================================================================
+  5-MINUTE QUICK START
+================================================================================
+
+1. Verify Your Setup
+   $ cat ../.env | grep LIVEKIT
+   # Should show: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
+
+2. Download Recent Calls
+   $ python download_livekit_recordings.py --recent 5
+   # Creates: recordings/ folder with .webm files
+
+3. Analyze Audio Quality
+   $ python analyze_call_quality.py recordings/*/*.webm
+   # Shows: Quality score (0-100), audio metrics, issues
+
+4. Listen to Recording
+   $ python playback_recordings.py --play recording.webm
+   # Plays using VLC, mpv, or ffplay
+
+5. Results
+   - Quality ≥ 80? Good to deploy!
+   - Quality < 80? Debug before deploying
+
+================================================================================
+  WHAT YOU GET
+================================================================================
+
+3 Python Tools (972 lines total):
+  ✓ download_livekit_recordings.py  - Download from LiveKit Cloud
+  ✓ analyze_call_quality.py         - Analyze audio quality metrics
+  ✓ playback_recordings.py          - Play, convert, manage recordings
+
+4 Documentation Files:
+  ✓ QUICK_START_RECORDINGS.md       - Start here! (5-min guide)
+  ✓ RECORDING_TOOLS_README.md       - Full documentation (600+ lines)
+  ✓ RECORDING_TOOLS_SUMMARY.md      - Feature overview
+  ✓ INDEX.md                        - Complete file index
+
+================================================================================
+  COMMON TASKS
+================================================================================
+
+List all recordings:
+  python download_livekit_recordings.py --list
+
+Download 5 most recent:
+  python download_livekit_recordings.py --recent 5
+
+Download by room name:
+  python download_livekit_recordings.py --download room_name
+
+Analyze quality:
+  python analyze_call_quality.py recordings/room/file.webm
+
+Play recording:
+  python playback_recordings.py --play file.webm
+
+Convert to MP3 (for sharing):
+  python playback_recordings.py --convert file.webm
+
+Show storage used:
+  python playback_recordings.py --storage
+
+================================================================================
+  DEPENDENCIES
+================================================================================
+
+Minimal (for downloading):
+  pip install httpx python-dotenv
+
+Full (for analysis + playback):
+  pip install httpx python-dotenv
+  brew install ffmpeg vlc      # macOS
+  apt-get install ffmpeg vlc   # Ubuntu/Debian
+
+================================================================================
+  WORKFLOW EXAMPLE
+================================================================================
+
+Scenario: "Why did quality drop after deploy?"
+
+1. Download latest calls:
+   python download_livekit_recordings.py --recent 5
+
+2. Analyze each:
+   python analyze_call_quality.py recordings/*/*.webm
+
+3. Find worst-scoring call:
+   # Check analysis reports
+
+4. Listen to it:
+   python playback_recordings.py --play worst_call.webm
+
+5. Compare with logs:
+   grep "Room: worst_call" ../agent_debug.log
+
+6. Debug root cause:
+   # Audio cutting? Network issue → Deploy on AWS
+   # Long silences? Latency issue → Check Fixes #2 and #4
+   # Garbled audio? Sample rate issue → Check config
+
+================================================================================
+  DOCUMENTATION ROADMAP
+================================================================================
+
+For 5-minute overview:
+  → Read: QUICK_START_RECORDINGS.md
+
+For complete details:
+  → Read: RECORDING_TOOLS_README.md
+
+For feature summary:
+  → Read: RECORDING_TOOLS_SUMMARY.md
+
+For all files and tools:
+  → Read: INDEX.md (this directory)
+
+================================================================================
+  QUALITY SCORE GUIDE
+================================================================================
+
+Quality Score Range:
+  ✅ 90-100  Excellent    → Ready to deploy
+  ✓  70-89   Good         → Monitor, acceptable
+  ⚠️  50-69   Fair         → Investigate issues
+  ❌ <50     Poor         → Debug before using
+
+What Affects Quality:
+  • Sample rate (should be 24000 Hz)
+  • Bitrate (should be 128+ kbps)
+  • Channels (should be 2 - stereo)
+  • Audio clarity (no cutting/popping)
+
+================================================================================
+  TROUBLESHOOTING
+================================================================================
+
+Problem: "No recordings found"
+  → Check .env: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
+
+Problem: "ffprobe not found"
+  → Install ffmpeg: brew install ffmpeg
+
+Problem: "No audio player found"
+  → Install VLC: brew install vlc
+
+Problem: "Permission denied"
+  → Run: chmod +x *.py
+
+Problem: "Module not found (httpx)"
+  → Install: pip install httpx python-dotenv
+
+================================================================================
+  READY TO START?
+================================================================================
+
+Next Steps:
+
+1. Install dependencies:
+   pip install httpx python-dotenv
+   brew install ffmpeg vlc
+
+2. Verify configuration:
+   cat ../.env | grep LIVEKIT
+
+3. Download your first recordings:
+   python download_livekit_recordings.py --recent 3
+
+4. Analyze them:
+   python analyze_call_quality.py recordings/*/*.webm
+
+5. Listen:
+   python playback_recordings.py --play recording.webm
+
+================================================================================
+
+📖 Documentation Files:
+   - QUICK_START_RECORDINGS.md  (Start here!)
+   - RECORDING_TOOLS_README.md  (Full guide)
+   - INDEX.md                   (File index)
+
+🚀 Ready? Start with:
+   python download_livekit_recordings.py --list
+
+================================================================================

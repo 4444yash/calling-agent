@@ -18,9 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Download LiveKit agent model files (Silero VAD, turn detector, etc.)
 RUN python -c "from livekit.agents.inference import _utils; _utils.download_model_files()" 2>/dev/null || true
 
-# Copy application code
-COPY agent.py .
-COPY .env .
+# Copy application code (entire src/ directory)
+COPY src/ ./src/
 
-ENTRYPOINT ["python", "agent.py"]
-CMD ["start"]
+# Entry point for LiveKit agent
+ENTRYPOINT ["python", "-m", "livekit.agents"]
+CMD ["start", "src/agent.py"]
