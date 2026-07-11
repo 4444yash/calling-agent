@@ -600,13 +600,11 @@ async def entrypoint(ctx: JobContext):
         logger.info(f"📋 Metadata keys: {list(metadata.keys())}")
 
     # ─── Room Audio Options ────────────────────────────────────────────
+    # Testing: Disabled DTLN to measure if Vobiz's built-in telecom-layer NC is sufficient
+    # Vobiz already provides: noise suppression + echo cancellation at the SIP/telecom layer
+    # Running DTLN on top may cause double-processing artifacts or waste CPU
     nc_filter = None
-    try:
-        from livekit.plugins import dtln
-        nc_filter = dtln.noise_suppression(strength=0.75)
-        logger.info("✓ DTLN noise suppression enabled (self-hosted open-source, strength=0.75)")
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to import or initialize DTLN plugin: {e}. Call will proceed without noise suppression.")
+    logger.info("⚪ DTLN noise suppression DISABLED for measurement. Relying on Vobiz telecom-layer NC")
 
     room_options = RoomOptions(
         audio_input=AudioInputOptions(
