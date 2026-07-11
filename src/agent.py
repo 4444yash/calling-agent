@@ -32,7 +32,9 @@ import httpx
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
-from livekit.agents import JobContext, JobRequest, WorkerOptions, cli, AgentSession, Agent, llm, stt, tts
+from typing import AsyncIterable
+from livekit.agents import JobContext, JobRequest, WorkerOptions, cli, Agent, llm, stt, tts
+from livekit.agents.voice import AgentSession, MetricsCollectedEvent
 from livekit.agents.voice.room_io import RoomOptions
 from livekit.agents.voice.room_io.types import AudioInputOptions
 from livekit.plugins import google, deepgram, smallestai, gnani, sarvam
@@ -159,181 +161,7 @@ import re
 # ContextVar to store the call-specific end-call callback
 end_call_callback_var = contextvars.ContextVar("end_call_callback", default=None)
 
-class LatencyTrackingLLMStream(llm.LLMStream):
-    def __init__(self, original_stream, on_first_token):
-        self.original_stream = original_stream
-        self.on_first_token = on_first_token
-        self.first_token_seen = False
-        self.start_time = time.time()
-        self.buffered_text = ""
-        
-    async def _run(self):
-        pass
-
-    @property
-    def chat_ctx(self) -> llm.ChatContext:
-        return self.original_stream.chat_ctx
-
-    @property
-    def tools(self) -> list:
-        return self.original_stream.tools
-
-    async def aclose(self) -> None:
-        await self.original_stream.aclose()
-        
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        chunk = await self.original_stream.__anext__()
-        if not self.first_token_seen:
-            self.first_token_seen = True
-            self.on_first_token(time.time() - self.start_time)
-            
-        if chunk.delta and chunk.delta.content:
-            content = chunk.delta.content
-            self.buffered_text += content
-            
-            # Look for the end-of-call marker
-            if "END_CALL" in self.buffered_text or "end_call" in self.buffered_text.lower():
-                # Strip it from the chunk content to keep it clean for TTS and display
-                for marker in ["[END_CALL]", "END_CALL", "[END_CALL", "END_CALL]", "end_call"]:
-                    if marker in content:
-                        content = content.replace(marker, "")
-                    if marker.lower() in content.lower():
-                        content = re.sub(re.escape(marker), "", content, flags=re.IGNORECASE)
-                
-                chunk.delta.content = content
-                
-                # Execute the registered task-local callback
-                callback = end_call_callback_var.get()
-                if callback:
-                    callback()
-                    
-        return chunk
-
-class LatencyTrackingLLM(llm.LLM):
-    def __init__(self, original_llm, on_first_token, on_llm_start=None):
-        super().__init__()
-        self.original_llm = original_llm
-        self.on_first_token = on_first_token
-        self.on_llm_start = on_llm_start
-
-    @property
-    def model(self) -> str:
-        return self.original_llm.model
-
-    @property
-    def provider(self) -> str:
-        return self.original_llm.provider
-        
-    def chat(self, *args, **kwargs):
-        if self.on_llm_start:
-            self.on_llm_start(time.time())
-        stream = self.original_llm.chat(*args, **kwargs)
-        return LatencyTrackingLLMStream(stream, self.on_first_token)
-
-class LatencyTrackingTTSStream(tts.ChunkedStream):
-    def __init__(self, original_stream, on_first_chunk):
-        self.original_stream = original_stream
-        self.on_first_chunk = on_first_chunk
-        self.first_chunk_seen = False
-        self.start_time = time.time()
-
-    async def _run(self, output_emitter):
-        pass
-
-    @property
-    def input_text(self) -> str:
-        return self.original_stream.input_text
-
-    @property
-    def done(self) -> bool:
-        return self.original_stream.done
-
-    @property
-    def exception(self) -> BaseException | None:
-        return self.original_stream.exception
-
-    async def collect(self):
-        return await self.original_stream.collect()
-
-    async def aclose(self) -> None:
-        await self.original_stream.aclose()
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        chunk = await self.original_stream.__anext__()
-        if not self.first_chunk_seen:
-            self.first_chunk_seen = True
-            self.on_first_chunk(time.time() - self.start_time)
-        return chunk
-
-class LatencyTrackingSynthesizeStream(tts.SynthesizeStream):
-    def __init__(self, original_stream, on_first_chunk):
-        self.original_stream = original_stream
-        self.on_first_chunk = on_first_chunk
-        self.first_chunk_seen = False
-        self.start_time = 0.0
-
-    async def _run(self, output_emitter):
-        pass
-
-    def push_text(self, token: str) -> None:
-        if not self.first_chunk_seen and self.start_time == 0.0:
-            self.start_time = time.time()
-        self.original_stream.push_text(token)
-
-    def flush(self) -> None:
-        self.original_stream.flush()
-
-    def end_input(self) -> None:
-        self.original_stream.end_input()
-
-    async def aclose(self) -> None:
-        await self.original_stream.aclose()
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        chunk = await self.original_stream.__anext__()
-        if not self.first_chunk_seen and self.start_time > 0.0:
-            self.first_chunk_seen = True
-            self.on_first_chunk(time.time() - self.start_time)
-        return chunk
-
-class LatencyTrackingTTS(tts.TTS):
-    def __init__(self, original_tts, on_first_chunk):
-        super().__init__(
-            capabilities=original_tts.capabilities,
-            sample_rate=original_tts.sample_rate,
-            num_channels=original_tts.num_channels
-        )
-        self.original_tts = original_tts
-        self.on_first_chunk = on_first_chunk
-
-    @property
-    def voice(self) -> str:
-        return self.original_tts.voice
-
-    @property
-    def model(self) -> str:
-        return self.original_tts.model
-
-    @property
-    def provider(self) -> str:
-        return self.original_tts.provider
-        
-    def synthesize(self, *args, **kwargs):
-        stream = self.original_tts.synthesize(*args, **kwargs)
-        return LatencyTrackingTTSStream(stream, self.on_first_chunk)
-
-    def stream(self, *args, **kwargs):
-        stream = self.original_tts.stream(*args, **kwargs)
-        return LatencyTrackingSynthesizeStream(stream, self.on_first_chunk)
+# Latency-tracking and [END_CALL] filtering are handled natively using the tts_text_transforms pipeline and the metrics_collected event.
 
 
 
@@ -506,7 +334,13 @@ async def entrypoint(ctx: JobContext):
         api_key=os.getenv("SARVAM_API_KEY"),
         language="hi-IN",
         model="saaras:v3",
-        # Sarvam optimized for Indian languages on phone-quality audio
+        high_vad_sensitivity=True,
+        min_speech_frames=1,                   # Fast onset: 1 frame ~16ms
+        first_turn_min_speech_frames=3,        # REDUCED: ~48ms first-turn threshold
+        negative_frames_count=8,               # CRITICAL: ~128ms endpointing (was 192ms with 12)
+        negative_frames_window=12,             # REDUCED: Much tighter window for faster decision
+        pre_speech_pad_frames=6,               # REDUCED: ~96ms padding (was 144ms with 9) — still safe
+        interrupt_min_speech_frames=1,         # REDUCED: Immediate interruption (was 2, 32ms)
     )
 
     llm_engine = google.LLM(
@@ -520,12 +354,6 @@ async def entrypoint(ctx: JobContext):
         model="lightning_v3.1",
         voice_id="advika",
         language="hi"  # Bypasses language ID overhead
-    )
-
-    vad_engine = inference.VAD(
-        model="silero",
-        activation_threshold=0.85,
-        min_speech_duration=0.35,
     )
 
     # ─── Scenario Detection & Direct Database Lookup ───────────────────
@@ -628,25 +456,6 @@ async def entrypoint(ctx: JobContext):
         "llm_start_time": 0.0
     }
 
-    # Time-to-First-Token / Time-to-First-Audio callbacks
-    def record_llm_start(start_time: float):
-        nonlocal turn_metrics
-        turn_metrics["llm_start_time"] = start_time
-
-    def record_llm_first_token(delay: float):
-        nonlocal turn_metrics
-        turn_metrics["llm_first_token_delay"] = delay
-        logger.debug(f"⚡ [Latency] LLM Time-to-First-Token: {delay:.2f}s")
-
-    def record_tts_first_chunk(delay: float):
-        nonlocal turn_metrics
-        turn_metrics["tts_first_chunk_delay"] = delay
-        logger.debug(f"⚡ [Latency] TTS Time-to-First-Chunk: {delay:.2f}s")
-
-    # Call-specific latency-tracking engine wrappers
-    call_llm = LatencyTrackingLLM(llm_engine, record_llm_first_token, record_llm_start)
-    call_tts = LatencyTrackingTTS(tts_engine, record_tts_first_chunk)
-
     # Call-specific hangup control (idempotent — safe against duplicate LLM completions)
     should_disconnect = False
     end_call_logged = False
@@ -690,34 +499,53 @@ async def entrypoint(ctx: JobContext):
 
     end_call_callback_var.set(handle_end_call)
 
+    # Clean end-call detection transform
+    async def filter_end_call_transform(text_stream: AsyncIterable[str]) -> AsyncIterable[str]:
+        buffered_text = ""
+        async for chunk in text_stream:
+            buffered_text += chunk
+            if "END_CALL" in buffered_text or "end_call" in buffered_text.lower():
+                handle_end_call()
+                content = chunk
+                for marker in ["[END_CALL]", "END_CALL", "[END_CALL", "END_CALL]", "end_call"]:
+                    if marker in content:
+                        content = content.replace(marker, "")
+                    if marker.lower() in content.lower():
+                        content = re.sub(re.escape(marker), "", content, flags=re.IGNORECASE)
+                if content:
+                    yield content
+            else:
+                yield chunk
+
     # ─── Session ────────────────────────────────────────────────────
     session = AgentSession(
         stt=stt_engine,
-        llm=call_llm,
-        tts=call_tts,
-        vad=vad_engine,
+        llm=llm_engine,
+        tts=tts_engine,
+        vad=None, # None because we are using STT-based VAD (Sarvam server-side VAD)
+        tts_text_transforms=[
+            "filter_markdown",
+            "filter_emoji",
+            filter_end_call_transform
+        ],
         turn_handling={
+            "turn_detection": "stt", # Use Sarvam's server-side in-built VAD
             "endpointing": {
-                # Use semantic turn detection model instead of fixed timers
-                # Detects actual end-of-turn based on speech prosody (intonation, pitch, rhythm)
-                # instead of just silence duration. This handles mid-sentence pauses correctly.
-                "mode": "model",
-                "min_delay": 0.7,        # Reduced to 0.7s for Sarvam (faster than Deepgram)
-                "max_delay": 3.0,        # Absolute max 3s (if silence detection fails, use this)
+                "mode": "silence_only",
+                "min_delay": 0.5, # Faster silence boundary
+                "max_delay": 3.0,
             },
             "interruption": {
-                "enabled": True,
-                # Require actual STT text before treating as interruption (not just voice start)
-                # Prevents false positives from background noise, breath sounds, code-switching
-                "mode": "stt",
-                "min_duration": 0.5,     # Wait for at least 500ms of acoustic+STT confidence
+                "enabled": True, # Re-enable interruptions since VAD is active
+                "mode": "stt", # Trigger on STT transcription/activity
+                "min_duration": 0.3,
             },
             "preemptive_generation": {
                 "enabled": False,
             }
         }
     )
-    logger.info("✓ Semantic turn detection enabled | Endpointing: min=0.7s (Sarvam), max=3.0s | Interruption: STT-based (500ms min)")
+    logger.info("✓ Sarvam server-side in-built VAD enabled via turn_detection='stt'")
 
     # ─── Observability & Latency Tracking ─────────────────────────────
     transcript = []
@@ -799,7 +627,9 @@ async def entrypoint(ctx: JobContext):
         new_state = event.new_state
         old_state = event.old_state
         
-        if new_state == "speaking":
+        if new_state == "thinking":
+            turn_metrics["llm_start_time"] = time.time()
+        elif new_state == "speaking":
             turn_metrics["playback_started"] = time.time()
             
             t_speech_end = turn_metrics["user_speech_end"]
@@ -885,7 +715,7 @@ async def entrypoint(ctx: JobContext):
     # Delay session start slightly to let WebRTC track negotiations stabilize
     # This prevents the native C++ noise cancellation filter from crashing due to rapid attach/detach
     logger.info("⏳ Waiting for WebRTC tracks to stabilize...")
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.3)  # Reduced from 1.0s
 
     await session.start(
         room=ctx.room,
@@ -897,11 +727,8 @@ async def entrypoint(ctx: JobContext):
     )
     
     # ─── Warmup & Scenario-specific Greeting ──────────────────────────
-    logger.info(f"⏳ Warming up ({scenario})...")
-    await asyncio.sleep(0.3)
-    
+    logger.info(f"🎤 Greeting ({scenario})...")
     try:
-        logger.info(f"🎤 Greeting ({scenario})...")
         await session.say(config["greeting"])
         logger.info(f"✅ Call started — {scenario} — noise handling active")
     except RuntimeError as e:
@@ -929,6 +756,17 @@ async def entrypoint(ctx: JobContext):
     def _guard_on_agent_activity(event):
         if event.new_state == "speaking":
             _touch_activity()
+
+    @session.on("metrics_collected")
+    def _on_metrics_collected(ev: MetricsCollectedEvent):
+        nonlocal turn_metrics
+        metrics = ev.metrics
+        if metrics.type == "llm_metrics":
+            turn_metrics["llm_first_token_delay"] = metrics.ttft
+            logger.info(f"⚡ [Latency] LLM Time-to-First-Token: {metrics.ttft:.2f}s")
+        elif metrics.type == "tts_metrics":
+            turn_metrics["tts_first_chunk_delay"] = metrics.ttfb
+            logger.info(f"⚡ [Latency] TTS Time-to-First-Chunk: {metrics.ttfb:.2f}s")
 
     async def _call_guard_loop():
         """Background task that checks call limits every 5 seconds."""
