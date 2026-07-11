@@ -505,6 +505,7 @@ async def entrypoint(ctx: JobContext):
     stt_engine = sarvam.STT(
         api_key=os.getenv("SARVAM_API_KEY"),
         language="hi-IN",
+        model="saaras:v3",
         # Sarvam optimized for Indian languages on phone-quality audio
     )
 
