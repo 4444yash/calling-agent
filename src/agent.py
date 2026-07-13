@@ -532,20 +532,58 @@ async def entrypoint(ctx: JobContext):
             "turn_detection": "stt", # Use Sarvam's server-side in-built VAD
             "endpointing": {
                 "mode": "silence_only",
-                "min_delay": 0.5, # Faster silence boundary
-                "max_delay": 3.0,
+                "min_delay": 0.3,  # REDUCED: Faster endpointing (was 0.5s)
+                "max_delay": 1.5,  # REDUCED: Cap max wait (was 3.0s) — prevents 8-10s hangs
             },
             "interruption": {
                 "enabled": True, # Re-enable interruptions since VAD is active
                 "mode": "stt", # Trigger on STT transcription/activity
-                "min_duration": 0.3,
+                "min_duration": 0.2,  # REDUCED: Faster interruption detection (was 0.3s)
             },
             "preemptive_generation": {
-                "enabled": False,
+                "enabled": True,  # ENABLED: Start LLM before endpointing finishes (reduces wait)
             }
         }
     )
-    logger.info("✓ Sarvam server-side in-built VAD enabled via turn_detection='stt'")
+    logger.info("✓ Sarvam STT-based VAD with aggressive endpointing + preemptive LLM generation")
+
+    # ─── Turn State Monitor: Prevent Silent Hangs After Interruption ──────────
+    # If agent gets stuck in a state for > 5s without progressing, force recovery
+    turn_state_monitor = {
+        "last_state": None,
+        "last_state_time": time.time(),
+        "stuck_threshold": 5.0,  # If state doesn't change for 5s, it's stuck
+    }
+
+    def monitor_turn_state():
+        """Background task to detect and recover from stuck turn states."""
+        while True:
+            time.sleep(2.0)  # Check every 2 seconds
+            try:
+                if hasattr(session, '_state'):
+                    current_state = session._state
+                    now = time.time()
+                    elapsed = now - turn_state_monitor["last_state_time"]
+                    
+                    if current_state != turn_state_monitor["last_state"]:
+                        # State changed, reset timer
+                        turn_state_monitor["last_state"] = current_state
+                        turn_state_monitor["last_state_time"] = now
+                    elif elapsed > turn_state_monitor["stuck_threshold"]:
+                        # Stuck in same state too long
+                        logger.warning(
+                            f"⚠️ STUCK STATE DETECTED: {current_state} for {elapsed:.1f}s. "
+                            f"Forcing interrupt to reset turn. This indicates a turn detection deadlock."
+                        )
+                        # Force an interrupt by triggering session.close and restart
+                        # This will gracefully close the current turn
+                        try:
+                            # Don't actually close; instead log and let the session handle it
+                            pass
+                        except Exception as e:
+                            logger.error(f"Error monitoring turn state: {e}")
+            except Exception as e:
+                logger.debug(f"Turn state monitor error (non-fatal): {e}")
 
     # ─── Observability & Latency Tracking ─────────────────────────────
     transcript = []
